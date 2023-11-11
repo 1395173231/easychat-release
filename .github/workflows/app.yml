@@ -74,6 +74,10 @@ jobs:
           cache: 'yarn'
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Add Rust Target
+        run: rustup target add ${{ matrix.config.rust_target }}
+
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.config.rust_target }}
