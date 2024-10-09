@@ -102,6 +102,7 @@ jobs:
           args: --debug --target ${{ matrix.config.rust_target }}
           releaseId: ${{ needs.create-release.outputs.release_id }}
           includeDebug: true
+          includeRelease: false
 
   publish-release:
     permissions:
