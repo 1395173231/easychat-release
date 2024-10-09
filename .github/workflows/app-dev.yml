@@ -99,7 +99,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
         with:
-          args: --debug --target ${{ matrix.config.rust_target }}
+          args: --target ${{ matrix.config.rust_target }}
           releaseId: ${{ needs.create-release.outputs.release_id }}
           includeDebug: true
           includeRelease: false
