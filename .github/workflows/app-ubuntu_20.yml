@@ -16,7 +16,6 @@ permissions:
   contents: read
 
 jobs:
-  # 仅解析 & 校验 Release；若不存在则失败。不会创建 tag / release / 发布。
   resolve-release:
     runs-on: ubuntu-latest
     outputs:
@@ -33,18 +32,13 @@ jobs:
         id: det
         shell: bash
         run: |
-          # 1) 优先使用手动输入的 tag
           if [ -n "${{ github.event.inputs.tag }}" ]; then
             TAG="${{ github.event.inputs.tag }}"
+          elif [ -n "${{ github.event.inputs.version }}" ]; then
+            TAG="app-v${{ github.event.inputs.version }}"
           else
-            # 2) 如果提供了 version，用它组装
-            if [ -n "${{ github.event.inputs.version }}" ]; then
-              TAG="app-v${{ github.event.inputs.version }}"
-            else
-              # 3) 否则从 tauri.conf.json 读取 version，再组装
-              VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
-              TAG="app-v${VERSION}"
-            fi
+            VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+            TAG="app-v${VERSION}"
           fi
           echo "TAG=$TAG" >> $GITHUB_OUTPUT
 
@@ -71,13 +65,12 @@ jobs:
               }
             }
 
-  # 使用容器 ubuntu:20.04 构建 Linux 兼容产物，并上传到已存在的 release
   build-tauri-linux-compat:
     needs: resolve-release
     if: ${{ needs.resolve-release.outputs.release_id != '' }}
     runs-on: ubuntu-22.04
     permissions:
-      contents: write  # 仅为上传资产到现有 release
+      contents: write
     container:
       image: ubuntu:20.04
     steps:
@@ -115,7 +108,14 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: 20
-          cache: 'yarn'
+          cache: 'npm'
+
+      # ✅ 显式安装 Yarn
+      - name: Install Yarn
+        run: |
+          npm install -g yarn
+          echo "YARN=$(which yarn)"
+          yarn --version
 
       - name: Install Rust (stable)
         run: |
@@ -130,9 +130,7 @@ jobs:
           key: linux-compat-x86_64-unknown-linux-gnu
 
       - name: Install frontend deps
-        run: |
-          npm install -g yarn
-          yarn install
+        run: yarn install --frozen-lockfile
 
       - name: Build & Upload to existing release
         uses: tauri-apps/tauri-action@v0
