@@ -117,12 +117,24 @@ jobs:
           echo "YARN=$(which yarn)"
           yarn --version
 
-      - name: Install Rust (stable)
+      - name: Install Rust (stable) and add target
+        env:
+          # 统一到容器内的 root 环境，避免 “$HOME differs from euid-obtained home directory”
+          HOME: /root
+          CARGO_HOME: /usr/local/cargo
+          RUSTUP_HOME: /usr/local/rustup
+        shell: bash
         run: |
+          set -euo pipefail
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-          echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+          # 加载 cargo/rustup 到当前 shell
+          . "$CARGO_HOME/env"
+          # 确认版本并添加目标
+          rustc --version
+          rustup --version
           rustup target add x86_64-unknown-linux-gnu
+          # 供后续 steps 使用
+          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
