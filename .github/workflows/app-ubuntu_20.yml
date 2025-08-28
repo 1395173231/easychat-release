@@ -110,16 +110,11 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      # ✅ 显式安装 Yarn
       - name: Install Yarn
-        run: |
-          npm install -g yarn
-          echo "YARN=$(which yarn)"
-          yarn --version
+        run: npm install -g yarn
 
-      - name: Install Rust (stable) and add target
+      - name: Install Rust, set default, and add target
         env:
-          # 统一到容器内的 root 环境，避免 “$HOME differs from euid-obtained home directory”
           HOME: /root
           CARGO_HOME: /usr/local/cargo
           RUSTUP_HOME: /usr/local/rustup
@@ -127,13 +122,9 @@ jobs:
         run: |
           set -euo pipefail
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-          # 加载 cargo/rustup 到当前 shell
           . "$CARGO_HOME/env"
-          # 确认版本并添加目标
-          rustc --version
-          rustup --version
+          rustup default stable
           rustup target add x86_64-unknown-linux-gnu
-          # 供后续 steps 使用
           echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
 
       - name: Rust cache
@@ -158,3 +149,4 @@ jobs:
         with:
           args: --target x86_64-unknown-linux-gnu
           releaseId: ${{ needs.resolve-release.outputs.release_id }}
+
