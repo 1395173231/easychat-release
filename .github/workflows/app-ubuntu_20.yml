@@ -1,0 +1,150 @@
+name: Release App (Legacy Linux Compat)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '已存在的 Release 标签（例如 app-v1.2.3）。留空则根据版本文件生成 app-v<version>'
+        required: false
+        type: string
+      version:
+        description: '可选：显式指定版本号（当 tag 留空时使用），例如 1.2.3'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  # 仅解析 & 校验 Release；若不存在则失败。不会创建 tag / release / 发布。
+  resolve-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.resolve.outputs.release_id }}
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          repository: 1395173231/EasyChat
+          token: ${{ secrets.PH_PTA }}
+
+      - name: Determine tag
+        id: det
+        shell: bash
+        run: |
+          # 1) 优先使用手动输入的 tag
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            # 2) 如果提供了 version，用它组装
+            if [ -n "${{ github.event.inputs.version }}" ]; then
+              TAG="app-v${{ github.event.inputs.version }}"
+            else
+              # 3) 否则从 tauri.conf.json 读取 version，再组装
+              VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+              TAG="app-v${VERSION}"
+            fi
+          fi
+          echo "TAG=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Get existing release by tag (must exist)
+        id: resolve
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const tag = `${{ steps.det.outputs.TAG }}`
+            try {
+              const { data } = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag
+              })
+              core.info(`Found release for tag ${tag} (id=${data.id})`)
+              core.setOutput('release_id', String(data.id))
+              core.setOutput('release_tag', tag)
+            } catch (error) {
+              if (error.status === 404) {
+                core.setFailed(`Release with tag "${tag}" not found. This workflow will NOT create tags or releases.`)
+              } else {
+                core.setFailed(`Failed to lookup release by tag: ${error.message}`)
+              }
+            }
+
+  # 使用容器 ubuntu:20.04 构建 Linux 兼容产物，并上传到已存在的 release
+  build-tauri-linux-compat:
+    needs: resolve-release
+    if: ${{ needs.resolve-release.outputs.release_id != '' }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write  # 仅为上传资产到现有 release
+    container:
+      image: ubuntu:20.04
+    steps:
+      - name: Prepare base tools
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git ca-certificates curl xz-utils tar gzip unzip pkg-config build-essential \
+            libssl-dev
+          update-ca-certificates
+
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          repository: 1395173231/EasyChat
+          token: ${{ secrets.PH_PTA }}
+
+      - name: Install Linux deps (Ubuntu 20.04)
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            libgtk-3-dev \
+            libwebkit2gtk-4.0-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libsoup2.4-dev \
+            libjavascriptcoregtk-4.0-dev
+          apt-get clean
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+          cache: 'yarn'
+
+      - name: Install Rust (stable)
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          echo "PATH=$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
+          rustup target add x86_64-unknown-linux-gnu
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-compat-x86_64-unknown-linux-gnu
+
+      - name: Install frontend deps
+        run: |
+          npm install -g yarn
+          yarn install
+
+      - name: Build & Upload to existing release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.PH_PTA }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+        with:
+          args: --target x86_64-unknown-linux-gnu
+          releaseId: ${{ needs.resolve-release.outputs.release_id }}
